@@ -1,0 +1,481 @@
+---
+title: "Fatima_Final_Project"
+author: "Minahil Fatima"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: lualatex
+    keep_tex: true
+tables: true
+---
+
+```{r setup, include=FALSE}
+
+##############################
+# 0 - Load Libraries ---------
+##############################
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, 
+                      fig.width = 10, fig.height = 8, fig.align = 'center')
+
+library(foreign) 
+library(plm)
+library(plyr)
+library(lmtest)
+library(rms)
+library(pcse)
+library(tidyverse)
+library(modelsummary)
+library(kableExtra)
+library(haven)
+library(fixest)
+library(glue)
+library("papeR")
+library(panelView)
+library(synthdid)
+library(patchwork)
+ library(xtable)
+ library(extrafont)
+
+##############################
+# Replication ----------------
+##############################
+
+##############################
+# 1 - Source Files -----------
+##############################
+
+# Setting Directory 
+#setwd("/Users/mdweaver/Desktop/ISPS Work 2013/data/Scheve_Stasavage_APSR_2012") 
+
+# Reading Data sets 
+annual_main <- read_dta("data/Scheve_Stasavage_APSR_2012_inheritannual.dta")
+annual_main <- subset(annual_main, independence==1 & year>=1816 & year<=2001)
+
+data_5yr    <- read_dta("data/Scheve_Stasavage_APSR_2012_inheritancefiveyr.dta")
+data_10yr   <- read_dta("data/Scheve_Stasavage_APSR_2012_inheritancetenyr.dta")
+data_1yr <- read_dta("data/Scheve_Stasavage_APSR_2012_inheritanceoneyr.dta")
+
+# Turning data to Panel 
+panel_5yr    <- pdata.frame(data_5yr, c('ccode','hdecadec'))
+panel_10yr   <- pdata.frame(data_10yr, c('ccode','decadec'))
+panel_1yr <- pdata.frame(data_1yr, c('ccode','year'))
+panel_annual <- pdata.frame(annual_main, c('ccode','year'))
+
+##############################
+# Ext: Synthetic DID ---------
+##############################
+
+##############################
+## Set Up --------------------
+##############################
+
+# Subsetting Data to Years 1919 - 1944 and Finland (treatment) plus Control Countries
+Synthetic_DID <- subset(annual_main, independence==1 & year>=1919 & year<=1944) |> 
+  filter(name == "finland" | name == "denmark" | name == "netherlands" | name == "sweden" | name == "switzerland") |> 
+  mutate(treatment = himobpopyear2p) |> 
+  select(name, year, topitaxrate2, treatment)
+
+# Turning Data to Panel 
+panel_SDID <- pdata.frame(Synthetic_DID, c('name','year'))
+
+#Converting our Long (Balanced) Panel to a Wide Matrix Required by Synthdid Estimator. 
+matrix_SDID = panel.matrices(panel_SDID)
+
+```
+
+
+```{r Figure1, echo=FALSE}
+
+##############################
+# w - Generating Figures -----
+##############################
+
+##############################
+## Figure 1 ------------------
+##############################
+
+fig.1 <- annual_main |> 
+  ggplot(aes(x = year, y = topitaxrate2, group = name)) +
+  geom_line() +
+  annotate("rect", xmin = 1915, xmax = 1918, ymin = Inf, ymax = -Inf,
+           fill = alpha("red", .5)) +
+  annotate("rect", xmin = 1941, xmax = 1945, ymin = Inf, ymax = -Inf,
+           fill = alpha("red", .5) ) +
+  labs(x = "Year", y = "Marginal Inheritance Tax (%) in Top Bracket") +
+  facet_wrap(~ name) +
+  geom_line(data =annual_main, alpha = .2) + 
+  facet_wrap(~ name) 
+
+fig.1
+```
+
+
+
+```{r Table1, echo=FALSE}
+##############################
+# 3 - Generating Tables ------
+##############################
+
+##############################
+## Table 1 -------------------
+##############################
+
+### 5 Year Columns------------
+#### Country Fixed Effects ---
+
+trends <- colnames(data_5yr) |> str_subset(pattern = "trend") 
+trends2 <- paste(trends, collapse = " + ")
+reg2.5.3 <- as.formula(glue("firsttopitaxrate2 ~ himobpopyear2pl1 + unisuffragel1 + leftexec2l1 + rgdppcl1 + {trends2} | ccode + hdecadec"))
+
+out.2.5.1 <- feols(firsttopitaxrate2 ~ himobpopyear2pl1 + unisuffragel1 | ccode + hdecadec, data_5yr)
+out.2.5.2 <- feols(firsttopitaxrate2 ~ himobpopyear2pl1 + unisuffragel1 + leftexec2l1 + rgdppcl1 | ccode + hdecadec, data_5yr)
+out.2.5.3 <- feols(reg2.5.3, data_5yr)
+
+#### Lagged DV w/ PCSE -----
+
+# Note, to use PCSE in R, we must remove missing values from the data
+temp <- subset(data_5yr, !is.na(firsttopitaxrate2) & !is.na(firsttopitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(unisuffragel1))
+temp1 <- subset(data_5yr, !is.na(firsttopitaxrate2) & !is.na(firsttopitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(unisuffragel1) & !is.na(leftexec2l1) & !is.na(rgdppcl1))
+
+reg2.5.6 <- as.formula(glue("firsttopitaxrate2 ~ firsttopitaxrate2l1 + himobpopyear2pl1 + unisuffragel1 + leftexec2l1 + rgdppcl1 + {trends2} | hdecadec"))
+
+out.2.5.4 <- feols(firsttopitaxrate2 ~ firsttopitaxrate2l1 + himobpopyear2pl1 + unisuffragel1 | hdecadec, temp)
+out.2.5.5 <- feols(firsttopitaxrate2 ~ firsttopitaxrate2l1 + himobpopyear2pl1 + unisuffragel1 + leftexec2l1 + rgdppcl1 | hdecadec, temp1)
+out.2.5.6 <- feols(reg2.5.6, temp1)
+
+### 10 Year Columns-----------
+#### Country Fixed Effects ---
+
+reg2.10.1 <- as.formula(glue("firsttopitaxrate2 ~ himobpopyear2pl1 + unisuffragel1 + leftexec2l1 + rgdppcl1 + {trends2}"))
+out.2.10.1 <- plm(reg2.10.1, , model="within", effect="twoways", data=data_10yr)
+
+#### Lagged DV, PCSE --------
+temp <- subset(data_10yr, !is.na(firsttopitaxrate2) & !is.na(firsttopitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(unisuffragel1) & !is.na(leftexec2l1) & !is.na(rgdppcl1))
+
+reg2.10.2 <- as.formula(glue("firsttopitaxrate2 ~ firsttopitaxrate2l1 + himobpopyear2pl1 + unisuffragel1 + leftexec2l1 + rgdppcl1 + {trends2} | decadec"))
+out.2.10.2 <- feols(reg2.10.2, temp) 
+
+
+### Annual Columns------------
+#### Country Fixed Effects ---
+
+reg2.1.1 <- as.formula(glue("topitaxrate2 ~ himobpopyear2pl1 + unisuffragel1 + leftexec2l1 + rgdppcl1 + {trends2}"))
+out.2.1.1 <- plm(reg2.1.1, , model="within", effect="twoways", data=panel_1yr)
+
+
+#### Lagged DV, PCSE---------
+temp <- subset(panel_1yr, !is.na(topitaxrate2) & !is.na(topitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(unisuffragel1) & !is.na(leftexec2l1) & !is.na(rgdppcl1))
+
+reg2.1.2 <- as.formula(glue("topitaxrate2 ~ topitaxrate2l1 + himobpopyear2pl1 + unisuffragel1 + leftexec2l1 + rgdppcl1 + {trends2} | year"))
+out.2.1.2 <- feols(reg2.1.2, temp) 
+
+models2 <- list(
+  "(1)" = out.2.5.1,
+  "(2)" = out.2.5.2,
+  "(3)" = out.2.5.3,
+  "(4)" = out.2.5.4,
+  "(5)" = out.2.5.5,
+  "(6)" = out.2.5.6,
+  "(7)" = out.2.10.1,
+  "(8)" = out.2.10.2,
+  "(9)" = out.2.1.1,
+  "(10)" = out.2.1.2
+)
+
+rows <- tibble::tribble(~term, ~Bivariate, ~Multivariate, ~Multivariate, ~Multivariate, ~Multivariate, ~Multivariate, ~Multivariate, ~Multivariate,  ~Multivariate, ~Multivariate,
+                        'Period Fixed Effects', 'Yes', 'Yes','Yes','Yes','Yes','Yes','Yes','Yes','Yes', 'yes',
+                        'Country-specific time trends', 'No', 'No','Yes','No','No','Yes','Yes','Yes','Yes', 'yes',
+                        'Country Fixed Effects', 'Yes', 'Yes', 'Yes','No','No','No','Yes','No','Yes','No'
+                        
+)
+attr(rows, 'position') <- c(11, 12, 13)
+
+Table1 <- modelsummary(models2, 
+                       gof_map = c("nobs"), 
+                       coef_omit = "trend", 
+                        estimate = "{estimate}{stars}",
+                       coef_map = c("firsttopitaxrate2l1" = "Top Rate t-1",
+                                    "topitaxrate2l1"  = "Top Rate t-1",
+                                    "himobpopyear2pl1" = "War Mobilization t-1",
+                                    "unisuffragel1" = "Universal Male Suffrage t-1",
+                                    "leftexec2l1" = "Left Executive t - 1",
+                                    "rgdppcl1" = "GDP per capita t - 1"),
+                       add_rows = rows,
+                       title = ' War Mobilization, Democracy, and Inheritance Taxation, 1816–2000: Universal Male Suffrage Measure of Democracy') |> 
+  add_header_above(c(" " = 1,
+                     "Country Fixed Effects" = 3,
+                     "Lag DV" = 3,
+                     "Country FE" = 1,
+                     "Lag DV" = 1,
+                     "Country FE" = 1,
+                     "Lag DV" = 1)) |> 
+  add_header_above(c(" " = 1,
+                     "5 Year data" = 6,
+                     "10 year data" = 2,
+                     "Annual" = 2))|> 
+  kable_styling(latex_options = "scale_down")
+
+Table1
+
+```
+
+```{r Table2, echo=FALSE}
+
+##############################
+## Table 2 -------------------
+##############################
+
+### 5 Year Columns------------
+#### Country Fixed Effects ---
+
+reg3.5.3 <- as.formula(glue("firsttopitaxrate2 ~ himobpopyear2pl1 + democracyl1 + leftexec2l1 + rgdppcl1 + {trends2} | ccode + hdecadec"))
+
+out.3.5.1 <- feols(firsttopitaxrate2 ~ himobpopyear2pl1 + democracyl1 | ccode + hdecadec, data_5yr)
+out.3.5.2 <- feols(firsttopitaxrate2 ~ himobpopyear2pl1 + democracyl1 + leftexec2l1 + rgdppcl1 | ccode + hdecadec, data_5yr)
+out.3.5.3 <- feols(reg3.5.3, data_5yr)
+
+#### Lagged DV w/ PCSE -----
+
+temp <- subset(data_5yr, !is.na(firsttopitaxrate2) & !is.na(firsttopitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(unisuffragel1))
+temp1 <- subset(data_5yr, !is.na(firsttopitaxrate2) & !is.na(firsttopitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(unisuffragel1) & !is.na(leftexec2l1) & !is.na(rgdppcl1))
+
+reg3.5.6 <- as.formula(glue("firsttopitaxrate2 ~ firsttopitaxrate2l1 + himobpopyear2pl1 + democracyl1 + leftexec2l1 + rgdppcl1 + {trends2} | hdecadec"))
+
+out.3.5.4 <- feols(firsttopitaxrate2 ~ firsttopitaxrate2l1 + himobpopyear2pl1 + democracyl1 | hdecadec, temp)
+out.3.5.5 <- feols(firsttopitaxrate2 ~ firsttopitaxrate2l1 + himobpopyear2pl1 + democracyl1 + leftexec2l1 + rgdppcl1 | hdecadec, temp1)
+out.3.5.6 <- feols(reg3.5.6, temp1)
+
+### 10 Year Columns-----------
+#### Country Fixed Effects ---
+
+reg3.10.1 <- as.formula(glue("firsttopitaxrate2 ~ himobpopyear2pl1 + democracyl1 + leftexec2l1 + rgdppcl1 + {trends2}"))
+out.3.10.1 <- plm(reg3.10.1, , model="within", effect="twoways", data=data_10yr)
+
+#### Lagged DV, PCSE ----
+temp <- subset(data_10yr, !is.na(firsttopitaxrate2) & !is.na(firsttopitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(unisuffragel1) & !is.na(leftexec2l1) & !is.na(rgdppcl1))
+
+reg3.10.2 <- as.formula(glue("firsttopitaxrate2 ~ firsttopitaxrate2l1 + himobpopyear2pl1 + democracyl1 + leftexec2l1 + rgdppcl1 + {trends2} | decadec"))
+out.3.10.2 <- feols(reg3.10.2, temp) 
+
+### Annual Columns------------
+#### Country Fixed Effects ---
+
+reg3.1.1 <- as.formula(glue("topitaxrate2 ~ himobpopyear2pl1 + democracyl1 + leftexec2l1 + rgdppcl1 + {trends2}"))
+out.3.1.1 <- plm(reg3.1.1, , model="within", effect="twoways", data=panel_1yr)
+
+
+#### Lagged DV, PCSE----------
+temp <- subset(panel_1yr, !is.na(topitaxrate2) & !is.na(topitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(unisuffragel1) & !is.na(leftexec2l1) & !is.na(rgdppcl1))
+
+reg3.1.2 <- as.formula(glue("topitaxrate2 ~ topitaxrate2l1 + himobpopyear2pl1 + democracyl1 + leftexec2l1 + rgdppcl1 + {trends2} | year"))
+out.3.1.2 <- feols(reg3.1.2, temp) 
+
+### Table 3 output: 
+
+table3 <- list(
+  "(1)" = out.3.5.1,
+  "(2)" = out.3.5.2,
+  "(3)" = out.3.5.3,
+  "(4)" = out.3.5.4,
+  "(5)" = out.3.5.5,
+  "(6)" = out.3.5.6,
+  "(7)" = out.3.10.1,
+  "(8)" = out.3.10.2,
+  "(9)" = out.3.1.1,
+  "(10)" = out.3.1.2
+)
+
+rows <- tibble::tribble(~term, ~Bivariate, ~Multivariate, ~Multivariate, ~Multivariate, ~Multivariate, ~Multivariate, ~Multivariate, ~Multivariate,  ~Multivariate, ~Multivariate,
+                        'Period Fixed Effects', 'Yes', 'Yes','Yes','Yes','Yes','Yes','Yes','Yes','Yes', 'yes',
+                        'Country-specific time trends', 'No', 'No','Yes','No','No','Yes','Yes','Yes','Yes', 'yes',
+                        'Country Fixed Effects', 'Yes', 'Yes', 'Yes','No','No','No','Yes','No','Yes','No'
+                        
+)
+attr(rows, 'position') <- c(11, 12, 13)
+
+Table2 <- modelsummary(table3, 
+                       gof_map = c("nobs"), 
+                       coef_omit = "trend", 
+                       estimate = "{estimate}{stars}",
+                       coef_map = c("firsttopitaxrate2l1" = "Top Rate t-1",
+                                    "topitaxrate2l1"  = "Top Rate t-1",
+                                    "himobpopyear2pl1" = "War Mobilization t-1",
+                                    "democracyl1" = "Competitive Elections t-1",
+                                    "leftexec2l1" = "Left Executive t - 1",
+                                    "rgdppcl1" = "GDP per capita t - 1"),
+                       add_rows = rows,
+                       title = ' War Mobilization, Democracy, and Inheritance Taxation, 1816–2000: Competitive Elections Measure of Democracy') |> 
+  add_header_above(c(" " = 1,
+                     "Country Fixed Effects" = 3,
+                     "Lag DV" = 3,
+                     "Country FE" = 1,
+                     "Lag DV" = 1,
+                     "Country FE" = 1,
+                     "Lag DV" = 1)) |> 
+  add_header_above(c(" " = 1,
+                     "5 Year data" = 6,
+                     "10 year data" = 2,
+                     "Annual" = 2)) |> 
+  kable_styling(latex_options = "scale_down")
+
+Table2
+
+```
+
+```{r table3, echo =FALSE, results='asis',message = FALSE}
+
+##############################
+## Table 3 (Extension) -------
+##############################
+
+# Estimating Treatment Effect Using: 1) Diff-in-Diff 2) Synthetic Control 3) Synthetic Diff-in-Diff
+
+estimators = list('Diff-in-Diff'           = did_estimate,
+                  'Synthetic Control'      = sc_estimate,
+                  'Synthetic Diff-in-Diff' = synthdid_estimate)
+
+
+estimates = lapply(estimators, function(estimator) { estimator(matrix_SDID$Y, matrix_SDID$N0, matrix_SDID$T0) } )
+standard.errors = mapply(function(estimate, name) {sqrt(vcov(estimate, method='placebo'))}, estimates, names(estimators))
+
+p.value = c("", "", "<0.10")
+
+finland.table = rbind(unlist(estimates), unlist(standard.errors))
+
+
+rownames(finland.table) = c('estimate', 'standard error')
+colnames(finland.table) = toupper(names(estimators ))
+
+dfList <- list(finland.table)
+
+attr(dfList, "message") <- c("", "Note: Estimates for average effect of War Mobilisation on Top Rate of Inheritance Taxation in Finland,", "1919−1944 , based on Diff-in-Diff, Synthetic Control, and Synthetic Diff-in-Diff along with estimated ", "standard errors using the “placebo method”.")
+
+print(xtableList(dfList, caption="Effect of War Mobilization on Top Rate of Inheritance Taxation in Finland, 1919−1944", label="xtabletab"),comment = FALSE , caption.placement="top", type="latex", digits=c(0,2,2,2))
+
+```
+
+```{r Figure2, echo=FALSE,  results='asis'}
+
+##############################
+## Figure 2 ------------------
+##############################
+
+names(estimates) = c('Diff-in-Diff', 'Synthetic Control', 'Synthetic Diff-in-Diff')
+
+graph <- synthdid_plot(estimates, facet.vertical=FALSE,
+              control.name='control', treated.name='Finland',
+              lambda.comparable=TRUE, se.method = 'none',
+              trajectory.linetype = 1, line.width=.50, effect.curvature=-.3,
+              trajectory.alpha=.7, effect.alpha=.7,
+              diagram.alpha=1, onset.alpha=.7) +
+  theme(legend.position=c(.5,.1), legend.direction='horizontal',legend.key=element_blank(), legend.background=element_blank()) +
+  labs(y = "Marginal Inheritance Tax (%) in Top Bracket") 
+
+weights_figure <- synthdid_units_plot(estimates, se.method='none') +
+  theme(legend.background=element_blank(), strip.background=element_blank(), strip.text.x = element_blank())  +
+  theme(legend.position=c(.5,.1), legend.direction='horizontal', legend.background=element_blank(), legend.title = element_blank()) +
+  labs(y = " Difference in Marginal Inheritance Tax (%)")
+
+fig.2 <- graph / weights_figure 
+
+fig.2
+
+```
+
+```{r Appendix2, echo=FALSE, results='asis'}
+
+##############################
+## Table A1 ------------------
+##############################
+
+temp0 <- subset(panel_annual, !is.na(topitaxrate2) & !is.na(himobpopyear2p)) |> 
+  select("topitaxrate2",
+         "himobpopyear2p",
+         "unisuffrage",
+         "democracy",
+         "noupper",
+         "directelec",
+         "secret",
+         "electorate25",
+         "electorate50",
+         "electorate75",
+         "leftexec2",
+         "rgdppc")
+
+TableA1 <- xtable(summarize(temp0, type = "numeric", na.rm = T, digits = 4, show.NAs = F, quantiles = F, colnames = c("", "Observations", "Mean", "Standard Deviation"), labels = T))
+
+TableA1
+
+
+##############################
+## Table A2 ------------------
+##############################
+
+#### Country Fixed Effects ---
+out.5.5.1 <- feols(firsttopitaxrate2 ~ himobpopyear2pl1 + Rmilexbadjdoll1 + unisuffragel1 + leftexec2l1 + rgdppcl1 | ccode + hdecadec, data_5yr)
+out.5.5.2 <- feols(firsttopitaxrate2 ~ himobpopyear2pl1 + Rmilexbadjdoll1 + democracyl1 + leftexec2l1 + rgdppcl1 | ccode + hdecadec, data_5yr)
+
+#### Lagged DV, PCSE----------
+temp <- subset(data_5yr, !is.na(firsttopitaxrate2) & !is.na(firsttopitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(Rmilexbadjdoll1) & !is.na(unisuffragel1) & !is.na(leftexec2l1) & !is.na(rgdppcl1))
+
+temp1 <- subset(data_5yr, !is.na(firsttopitaxrate2) & !is.na(firsttopitaxrate2l1) & !is.na(himobpopyear2pl1) & !is.na(Rmilexbadjdoll1) & !is.na(democracyl1) & !is.na(leftexec2l1) & !is.na(rgdppcl1))
+
+out.5.5.3 <- feols(firsttopitaxrate2 ~ firsttopitaxrate2l1 + Rmilexbadjdoll1 + himobpopyear2pl1 + unisuffragel1 + leftexec2l1 + rgdppcl1| hdecadec, temp)
+out.5.5.4 <- feols(firsttopitaxrate2 ~ firsttopitaxrate2l1 + Rmilexbadjdoll1 + himobpopyear2pl1 + democracyl1 + leftexec2l1 + rgdppcl1| hdecadec, temp1)
+
+table5 <- list(
+  "(1)" = out.5.5.1,
+  "(2)" = out.5.5.2,
+  "(3)" = out.5.5.3,
+  "(4)" = out.5.5.4
+)
+
+rows <- tibble::tribble(~term, ~Bivariate, ~Multivariate, ~Multivariate, ~Multivariate,
+                        'Period Fixed Effects', 'Yes', 'Yes','Yes','Yes',
+                        'Country Fixed Effects', 'Yes', 'Yes', 'No','No'
+                        
+)
+attr(rows, 'position') <- c(15, 16)
+
+TableA2 <-modelsummary(table5, 
+                      gof_map = c("nobs"), 
+                      coef_omit = "trend", 
+                      coef_map = c("firsttopitaxrate2l1" = "Top Rate t-1",
+                                   "topitaxrate2l1"  = "Top Rate t-1",
+                                   "himobpopyear2pl1" = "War Mobilization t-1",
+                                   "Rmilexbadjdoll1" = "Military Expenditure t-1",
+                                   "unisuffragel1" = "Universal Male Suffrage t-1",
+                                   "democracyl1" = "Competitive Elections t-1",
+                                   "leftexec2l1" = "Left Executive t - 1",
+                                   "rgdppcl1" = "GDP per capita t - 1"),
+                      add_rows = rows,
+                      title = ' War Mobilization, Democracy, and Inheritance Taxation, 1816–2000: Conditioning on Military Expenditures') |> 
+  add_header_above(c(" " = 1,
+                     "Country Fixed Effects" = 2,
+                     "Lagged Dependent Variable" = 2)) |> 
+  add_header_above(c(" " = 1,
+                     "5 Year data" = 4))
+
+TableA2
+
+
+fig.A1 <- annual_main  |> 
+  panelview(topitaxrate2 ~  himobpopyear2p, index = c("name", "year"), 
+            axis.lab.gap = c(10, 0),
+            xlab = "", 
+            ylab = "", 
+            main = "War Mobilization Treatment")
+
+
+fig.A2 <- annual_main  |> 
+  panelview(topitaxrate2  ~ unisuffrage, index = c("name", "year"), 
+            axis.lab.gap = c(10, 0),
+            xlab = "", 
+            ylab = "", 
+            main = "Democracy Treatment")
+
+
+
+```
+
